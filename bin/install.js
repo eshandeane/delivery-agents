@@ -7,37 +7,25 @@ const { execSync } = require("child_process");
 
 const AGENTS_DIR = path.join(os.homedir(), ".claude", "agents");
 const LEARNINGS_DIR = path.join(AGENTS_DIR, "learnings");
+const SKILLS_DIR = path.join(os.homedir(), ".claude", "skills");
+const PERSONAS_DIR = path.join(os.homedir(), ".claude", "personas");
 
 const PKG_DIR = path.join(__dirname, "..");
-const AGENTS_SRC = path.join(PKG_DIR, "agents");
-const LEARNINGS_SRC = path.join(PKG_DIR, "learnings");
 
 const BOLD = "\x1b[1m";
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
+const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
 
-function log(msg) {
-  console.log(msg);
-}
-
-function success(msg) {
-  console.log(`${GREEN}✓${RESET} ${msg}`);
-}
-
-function warn(msg) {
-  console.log(`${YELLOW}!${RESET} ${msg}`);
-}
-
-function header(msg) {
-  console.log(`\n${BOLD}${msg}${RESET}`);
-}
+const success = (msg) => console.log(`${GREEN}✓${RESET} ${msg}`);
+const warn = (msg) => console.log(`${YELLOW}!${RESET} ${msg}`);
+const header = (msg) => console.log(`\n${BOLD}${msg}${RESET}`);
+const dim = (msg) => console.log(`${DIM}${msg}${RESET}`);
 
 function ensureDir(dir) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
 function copyFile(src, dest, overwrite = true) {
@@ -49,6 +37,16 @@ function copyFile(src, dest, overwrite = true) {
   return true;
 }
 
+function copyDir(src, dest) {
+  ensureDir(dest);
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) copyDir(srcPath, destPath);
+    else fs.copyFileSync(srcPath, destPath);
+  }
+}
+
 function isInstalled(cmd) {
   try {
     execSync(`which ${cmd}`, { stdio: "ignore" });
@@ -58,53 +56,133 @@ function isInstalled(cmd) {
   }
 }
 
-header("delivery-agents installer");
-log("Installing Lisa, Bart, and Prince into ~/.claude/agents/\n");
+const AGENTS = {
+  bart: {
+    file: "bart.md",
+    skills: ["agent-browser", "userinterface-wiki"],
+    plugins: ["frontend-design", "prototype-feedback"],
+  },
+  lisa: {
+    file: "lisa-discovery.md",
+    skills: [],
+    plugins: [],
+  },
+  prince: {
+    file: "acceptance-tester.md",
+    skills: ["agent-browser"],
+    plugins: [],
+  },
+};
 
-// 1. Create directories
+const arg = process.argv[2];
+const targets = arg && AGENTS[arg] ? [arg] : Object.keys(AGENTS);
+
+if (arg && !AGENTS[arg] && arg !== "all") {
+  console.log(`Unknown agent: ${arg}`);
+  console.log(`Usage: npx delivery-agents [bart|lisa|prince]`);
+  process.exit(1);
+}
+
+console.log(`\n${BOLD}delivery-agents installer${RESET}`);
+if (targets.length === 1) {
+  console.log(`Installing ${targets[0]}...`);
+} else {
+  console.log(`Installing Lisa, Bart, and Prince...`);
+}
+
 ensureDir(AGENTS_DIR);
 ensureDir(LEARNINGS_DIR);
+ensureDir(SKILLS_DIR);
+ensureDir(PERSONAS_DIR);
 
-// 2. Copy agent files
+// Install agents
 header("Agents");
-const agents = fs.readdirSync(AGENTS_SRC).filter((f) => f.endsWith(".md"));
-for (const file of agents) {
-  const src = path.join(AGENTS_SRC, file);
-  const dest = path.join(AGENTS_DIR, file);
+const skillsNeeded = new Set();
+const pluginsNeeded = new Set();
+
+for (const name of targets) {
+  const agent = AGENTS[name];
+  const src = path.join(PKG_DIR, "agents", agent.file);
+  const dest = path.join(AGENTS_DIR, agent.file);
   const existed = fs.existsSync(dest);
   copyFile(src, dest, true);
-  success(`${file}${existed ? " (updated)" : ""}`);
+  success(`${agent.file}${existed ? " (updated)" : ""}`);
+  agent.skills.forEach((s) => skillsNeeded.add(s));
+  agent.plugins.forEach((p) => pluginsNeeded.add(p));
 }
 
-// 3. Copy learnings — never overwrite (preserve accumulated data)
+// Install learnings starters
 header("Learnings");
-const learnings = fs.readdirSync(LEARNINGS_SRC).filter((f) => f.endsWith(".md"));
-for (const file of learnings) {
-  const src = path.join(LEARNINGS_SRC, file);
+for (const name of targets) {
+  const file = `${name}-learnings.md`;
+  const src = path.join(PKG_DIR, "learnings", file);
   const dest = path.join(LEARNINGS_DIR, file);
-  const copied = copyFile(src, dest, false);
-  if (copied) success(`${file} (starter)`);
+  if (fs.existsSync(src)) {
+    const copied = copyFile(src, dest, false);
+    if (copied) success(`${file} (starter)`);
+  }
 }
 
-// 4. Check agent-browser
+// Install skills
+if (skillsNeeded.size > 0) {
+  header("Skills");
+  for (const skill of skillsNeeded) {
+    const src = path.join(PKG_DIR, "skills", skill);
+    const dest = path.join(SKILLS_DIR, skill);
+    if (fs.existsSync(src)) {
+      copyDir(src, dest);
+      success(`${skill} → ~/.claude/skills/${skill}/`);
+    }
+  }
+}
+
+// Install persona templates
+header("Personas");
+const personaFiles = fs.readdirSync(path.join(PKG_DIR, "personas"));
+for (const file of personaFiles) {
+  const src = path.join(PKG_DIR, "personas", file);
+  const dest = path.join(PERSONAS_DIR, file);
+  const copied = copyFile(src, dest, false);
+  if (copied) success(`${file} → ~/.claude/personas/ (fill this in!)`);
+}
+
+// Plugin dependencies
+if (pluginsNeeded.size > 0) {
+  header("Plugin dependencies");
+  for (const plugin of pluginsNeeded) {
+    warn(`${plugin} — install with: ${CYAN}claude plugin install ${plugin}${RESET}`);
+  }
+}
+
+// Check agent-browser CLI
 header("Dependencies");
 if (isInstalled("agent-browser")) {
   success("agent-browser is installed");
 } else {
-  warn("agent-browser not found — install it with:");
-  log(`   ${CYAN}npm i -g agent-browser && agent-browser install${RESET}`);
+  warn(`agent-browser not found — install with:\n   ${CYAN}npm i -g agent-browser && agent-browser install${RESET}`);
 }
 
-// 5. Print alias instructions
+// Aliases
 header("Terminal aliases");
-log("Add these to your ~/.zshrc or ~/.bashrc:\n");
-log(`   ${CYAN}alias bart='claude --agent bart --dangerously-skip-permissions'`);
-log(`   alias lisa='claude --agent lisa --dangerously-skip-permissions'`);
-log(`   alias prince='claude --agent prince --dangerously-skip-permissions'${RESET}\n`);
-log("Then reload your shell:  source ~/.zshrc\n");
+console.log("Add these to your ~/.zshrc or ~/.bashrc:\n");
+for (const name of targets) {
+  console.log(`   ${CYAN}alias ${name}='claude --agent ${name} --dangerously-skip-permissions'${RESET}`);
+}
+console.log(`\nThen reload: ${CYAN}source ~/.zshrc${RESET}\n`);
+
+// Persona reminder
+if (targets.includes("lisa")) {
+  header("Next step");
+  console.log(`Fill in your persona files at ${CYAN}~/.claude/personas/${RESET}`);
+  dim("  user-persona.md    — who is your primary user?");
+  dim("  product-context.md — what does your product do?\n");
+  console.log(`Lisa will find them automatically by matching the user name you type at startup.\n`);
+}
 
 header("Done");
-log("Run agents from your project directory:");
-log(`   ${CYAN}bart${RESET}    — UI/UX prototyping`);
-log(`   ${CYAN}lisa${RESET}    — discovery research`);
-log(`   ${CYAN}prince${RESET}  — acceptance testing\n`);
+console.log("Run agents from your project directory:");
+for (const name of targets) {
+  const descriptions = { lisa: "discovery research", bart: "UI/UX prototyping", prince: "acceptance testing" };
+  console.log(`   ${CYAN}${name}${RESET}  — ${descriptions[name]}`);
+}
+console.log("");

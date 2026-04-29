@@ -287,7 +287,7 @@ After all user stories are tested, save a structured report and screenshots loca
 If the overall status is PASS (all criteria passed or were fixed), generate a draft product announcement based on the PRD. Append it to the same `outputs/acceptance-tests/{feature-slug}-{YYYY-MM-DD}/report.md` under a new heading.
 
 1. **Read the PRD** for feature name, user stories, and descriptions
-2. **Read the delta persona** at `~/.claude/skills/ux-review-internal/delta-persona.md` to connect features to real workflow pain points
+2. **Read the delta persona** at `~/.claude/personas/user-persona.md` to connect features to real workflow pain points
 3. **Write the announcement** following these rules:
 
 **Structure:**

@@ -8,6 +8,8 @@
   "files": [
     "agents/",
     "learnings/",
+    "skills/",
+    "personas/",
     "bin/",
     "README.md"
   ],

@@ -128,7 +128,7 @@ This is where Bart earns its name. Be ruthlessly honest about the prototype.
 
 1. **Invoke the `/prototype-feedback` skill** for structured feedback
 2. **Review against the design brief criteria** — does it actually meet the spec?
-3. **Review against the delta persona** — read `~/.claude/skills/ux-review-internal/delta-persona.md` for user context
+3. **Review against the delta persona** — read `~/.claude/personas/user-persona.md` for user context
 4. **Score the prototype** on these dimensions (1-5 each):
    - **Visual clarity**: Is the layout clean, hierarchy obvious, information scannable?
    - **Interaction quality**: Do hover states, transitions, and feedback feel right?
