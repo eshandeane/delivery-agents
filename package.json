@@ -1,0 +1,28 @@
+{
+  "name": "delivery-agents",
+  "version": "1.0.0",
+  "description": "Lisa, Bart, and Prince — three Claude Code agents for the full PM-to-shipped-feature cycle",
+  "bin": {
+    "delivery-agents": "./bin/install.js"
+  },
+  "files": [
+    "agents/",
+    "learnings/",
+    "bin/",
+    "README.md"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "agents",
+    "ai",
+    "pm",
+    "prototyping",
+    "acceptance-testing"
+  ],
+  "author": "Eshan Deane",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
