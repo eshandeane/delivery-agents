@@ -52,6 +52,7 @@ Bart expects:
 
 - Design brief at `outputs/bart/design-brief.json`
 - `/frontend-design`, `/userinterface-wiki`, and `/prototype-feedback` skills in `.claude/skills/`
+- Tasks that exceed 10 review/iterate cycles without hitting 4+/5 on all dimensions are automatically marked `blocked` and flagged in the final summary for human review
 
 ## Learnings
 
