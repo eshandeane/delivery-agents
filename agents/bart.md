@@ -150,6 +150,15 @@ This is where Bart earns its name. Be ruthlessly honest about the prototype.
 5. **Commit** the improvements: `iterate: [Task ID] - [description of improvements]`
 6. Set task `phase` back to `review` (goes through review again)
 
+### Blocked State
+
+If a task has gone through **10 or more review/iterate cycles** without all scores reaching 4+, mark it as blocked:
+
+- Set `phase: blocked`, `complete: false`
+- Log the reason: which dimensions consistently score low and why
+- Move to the next incomplete task
+- Surface all blocked tasks in the final summary with specific notes so a human can intervene
+
 ## Design Brief Format
 
 ```json
