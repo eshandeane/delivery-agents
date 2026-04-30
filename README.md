@@ -18,7 +18,7 @@ That's it. The installer copies the agents into `~/.claude/agents/`, sets up sta
 
 | Agent | Model | Role |
 |-------|-------|------|
-| **Lisa** | opus | Autonomous discovery — researches the problem space, synthesizes user research, competitive intel, and analytics into a structured brief |
+| **Lisa** | opus | Autonomous discovery — asks 3 questions, loads your user persona, then runs full discovery: JTBD framing, workaround analysis, codebase exploration, impact sizing with driver trees, risk assessment, and 3 solution tiers with a recommendation. Outputs a structured brief ready to hand to Bart. |
 | **Bart** | sonnet | UI/UX prototyping — builds, reviews, and iterates on frontend prototypes until every dimension scores 4+/5 |
 | **Prince** | sonnet | Acceptance testing — spins up an isolated test environment, tests every UI-testable criterion from the PRD, and outputs a structured pass/fail report |
 
