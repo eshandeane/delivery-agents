@@ -28,7 +28,7 @@ Run agents from your project directory:
 
 ```bash
 bart    # reads outputs/bart/design-brief.json and starts prototyping
-lisa    # reads the discovery brief and starts research
+lisa    # reads reads the problem statement or feature, target user, goal and starts research
 prince  # finds the PRD, spins up test env, runs acceptance tests
 ```
 
