@@ -26,28 +26,9 @@ Log BEFORE and AFTER every step. Format:
 
 ---
 
-## Phase 0: Load Learnings
+## Your Task
 
-First thing — check for accumulated learnings from prior runs:
-
-```bash
-cat ~/.claude/agents/learnings/bart-learnings.md 2>/dev/null | tee -a outputs/bart/bart-progress.log || echo "[Bart] No prior learnings — first run." | tee -a outputs/bart/bart-progress.log
-```
-
-Apply any relevant learnings throughout this iteration.
-
----
-
-## Your Task (one phase per invocation)
-
-1. Read `outputs/bart/design-brief.json`
-2. Read `outputs/bart/progress.txt` — check Design Patterns section first
-3. Check you're on the correct branch (`branchName` in the brief). If not, check it out or create from dev.
-4. Pick the **highest priority** task where `complete: false` and `phase != blocked`
-5. Determine the current phase for that task
-6. Execute exactly that one phase
-7. Update `design-brief.json` and `progress.txt`
-8. Check stop condition (see below)
+Your task ID, title, and phase are pre-loaded at the top of this prompt under `## Your Job This Session`. Start there — do not re-read the brief to decide what to do.
 
 ---
 
@@ -77,33 +58,80 @@ You are building the UI directly (no sub-agent dispatch in print mode).
 - Use `"use client"` for interactive components
 - Keep components simple and focused
 
+**TypeScript check — before committing:**
+
+```bash
+npx tsc --noEmit 2>&1 | head -50 | tee -a outputs/bart/bart-progress.log
+```
+
+Fix any type errors before proceeding. Log result.
+
 **After building:**
 
-1. Verify in browser using `/agent-browser` skill:
+1. Verify dev server is up before running browser checks:
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 | grep -q "200\|301\|302" \
+     && echo "[Bart] Dev server OK" | tee -a outputs/bart/bart-progress.log \
+     || echo "[Bart] WARNING: dev server not responding — start it first" | tee -a outputs/bart/bart-progress.log
+   ```
+2. Verify in browser using `/agent-browser` skill:
    - Navigate to the page
    - Log in: internal@test.com / Test1234!
    - Take screenshots → save to `outputs/bart/screenshots/`
-2. Commit: `prototype: [Task ID] - [Task Title]`
-3. Set task `phase` to `review`
+3. Commit: `prototype: [Task ID] - [Task Title]`
+4. Set task `phase` to `review`
 
 Log every step with result.
 
 ### review — Critique the UI
 
-1. Invoke `/prototype-feedback` skill for structured feedback
-2. Review against the design brief specs
-3. Score on 5 dimensions (1–5 each):
-   - **Visual clarity**: layout clean, hierarchy obvious, scannable?
-   - **Interaction quality**: hover states, transitions, feedback feel right?
-   - **Consistency**: matches the app's design language?
-   - **Accessibility**: keyboard nav, ARIA, contrast, touch targets?
-   - **Responsiveness**: works on mobile without overflow?
-4. Record findings in `progress.txt` with specific actionable feedback
-5. Decision:
-   - ALL scores 4+ → set `phase: done`, `complete: true`
-   - ANY score 3 or below → set `phase: iterate` with specific fixes listed
-   - Total below 15 → set `phase: build` (start over)
-   - 10+ review/iterate cycles on this task without passing → set `phase: blocked`, log why
+**Step 1 — Acceptance criteria check:**
+
+Read the current task from `design-brief.json`. If the task has an `acceptanceCriteria` array, verify each item in the browser — navigate to the page and check it directly. List which criteria pass and which fail. Any failing criterion is an automatic `phase: iterate`.
+
+**Step 2 — Evidence-gated scoring:**
+
+Each dimension requires a concrete browser action before you can assign a score. Do not score any dimension without performing the action first.
+
+| Dimension | Required action before scoring |
+|-----------|-------------------------------|
+| **Visual clarity** | Take a screenshot. Review the layout, hierarchy, and scannability in the image. |
+| **Interaction quality** | Click interactive elements (buttons, rows, tabs). Observe hover states and transitions. |
+| **Consistency** | Open 2–3 other pages in the app. Compare colors, fonts, spacing, component patterns. |
+| **Accessibility** | Tab through the UI without a mouse. Check that focusable elements have visible outlines. Inspect color contrast on key text. |
+| **Responsiveness** | Resize the browser to 375px wide. Screenshot the result. Look for overflow, broken layouts, unreadable text. |
+
+For each dimension: perform the action, describe what you observed, then assign a score (1–5).
+
+**FDE Design System Checklist (review against these):**
+- [ ] Uses shadcn/ui components from `@/components/ui` — not custom-built equivalents
+- [ ] Follows Tailwind CSS v4 patterns (no arbitrary values without strong reason)
+- [ ] Icon-only buttons have tooltips (`<Tooltip>` wrapping `<Button size="icon">`)
+- [ ] Interactive rows have `hover:bg-muted cursor-pointer` applied
+- [ ] Loading states exist for async actions
+- [ ] No hardcoded colors — uses design tokens / Tailwind semantic classes
+- [ ] Mobile layout tested and does not overflow
+- [ ] Keyboard navigation works (tab order is logical)
+
+**Decision:**
+- ALL scores 4+ AND all checklist items pass → set `phase: done`, `complete: true`
+- ANY score 3 or below OR checklist item fails → set `phase: iterate` with specific fixes listed
+- Total below 15 → set `phase: build` (start over)
+- 10+ review/iterate cycles on this task without passing → set `phase: blocked`, log why
+
+**Write scores back to `design-brief.json`** so `bart:feedback` can display them:
+
+```bash
+# Replace DT-XXX and score values with actuals
+jq '(.designTasks[] | select(.id == "DT-XXX")).scores |= {
+  "visual": 4,
+  "interaction": 3,
+  "consistency": 4,
+  "accessibility": 4,
+  "responsiveness": 4
+}' outputs/bart/design-brief.json > outputs/bart/design-brief.tmp.json \
+  && mv outputs/bart/design-brief.tmp.json outputs/bart/design-brief.json
+```
 
 Log scores explicitly:
 
@@ -114,12 +142,53 @@ Log scores explicitly:
 
 ### iterate — Fix and Improve
 
-1. Read review feedback from `progress.txt`
-2. Apply the specific fixes
-3. Invoke `/userinterface-wiki` again for dimensions that scored low
-4. Verify fixes in browser with `/agent-browser`, take new screenshots
-5. Commit: `iterate: [Task ID] - [description of improvements]`
-6. Set task `phase` back to `review`
+Read the `## Fixes Needed` section from the most recent review entry in `progress.txt`. The last review entry is at the bottom of the file.
+
+**Loop detection — before touching any code:**
+
+Count how many iterate cycles have already run for this task:
+
+```bash
+TASK_ID="DT-XXX"  # replace with actual task ID
+ITERATE_COUNT=$(grep -c "^## .* - $TASK_ID - Phase: iterate" outputs/bart/progress.txt 2>/dev/null || echo 0)
+echo "[Bart] Iterate cycle count for $TASK_ID: $ITERATE_COUNT" | tee -a outputs/bart/bart-progress.log
+```
+
+If `ITERATE_COUNT` is 3 or more, check whether the same dimensions are failing repeatedly:
+
+```bash
+grep -A 8 "^## .* - $TASK_ID - Phase: review" outputs/bart/progress.txt \
+  | grep "| [0-9]/5" | grep "| [123]/5" \
+  | tee -a outputs/bart/bart-progress.log
+```
+
+If the same dimension scores ≤3 across 2+ consecutive reviews, do not attempt the same fix again. Instead, log:
+
+```
+[Bart] RECURRING BLOCKER: [dimension] has failed [N] consecutive reviews.
+[Bart]   Prior fix attempts: [brief description]
+[Bart]   Trying different approach: [what you'll do differently]
+```
+
+If `ITERATE_COUNT` reaches 5 on the same failing dimension, set `phase: blocked` and log the specific component/pattern that keeps failing so a human can intervene.
+
+Apply the specific fixes listed in the latest `## Fixes Needed` section.
+
+Invoke `/userinterface-wiki` again for dimensions that scored low.
+
+**TypeScript check — before committing:**
+
+```bash
+npx tsc --noEmit 2>&1 | head -50 | tee -a outputs/bart/bart-progress.log
+```
+
+Fix any type errors before proceeding.
+
+Verify dev server is up, then verify fixes in browser with `/agent-browser`. Take new screenshots.
+
+Commit: `iterate: [Task ID] - [description of improvements]`
+
+Set task `phase` back to `review`.
 
 ---
 
@@ -129,13 +198,32 @@ Log scores explicitly:
 {
   "project": "...",
   "branchName": "bart/...",
+  "description": "...",
   "designTasks": [
     {
       "id": "DT-001",
       "title": "...",
+      "description": "...",
+      "page": "/path/to/page",
+      "specs": {
+        "layout": "...",
+        "components": ["..."],
+        "interactions": ["..."],
+        "constraints": ["..."]
+      },
+      "acceptanceCriteria": [
+        "Observable, browser-verifiable statement"
+      ],
+      "priority": 1,
       "phase": "build|review|iterate|done|blocked",
       "complete": false,
-      "scores": {},
+      "scores": {
+        "visual": 0,
+        "interaction": 0,
+        "consistency": 0,
+        "accessibility": 0,
+        "responsiveness": 0
+      },
       "notes": ""
     }
   ]
@@ -158,14 +246,17 @@ APPEND to `outputs/bart/progress.txt`:
 - file paths
 
 ### Review Scores (review phase only)
-| Dimension | Score | Notes |
-|-----------|-------|-------|
-| Visual clarity | X/5 | ... |
-| Interaction quality | X/5 | ... |
-| Consistency | X/5 | ... |
-| Accessibility | X/5 | ... |
-| Responsiveness | X/5 | ... |
+| Dimension | Score | Evidence observed |
+|-----------|-------|------------------|
+| Visual clarity | X/5 | [what you saw in the screenshot] |
+| Interaction quality | X/5 | [what happened when you clicked] |
+| Consistency | X/5 | [how it compared to other pages] |
+| Accessibility | X/5 | [what happened when you tabbed] |
+| Responsiveness | X/5 | [what the 375px screenshot showed] |
 | **Total** | **XX/25** | |
+
+### FDE Checklist
+- [x] or [ ] each item with notes
 
 ### Fixes Needed (if iterating)
 - [ ] Specific fix
@@ -183,12 +274,13 @@ If you discover a reusable design pattern, add it to the `## Design Patterns` se
 
 ---
 
-## Self-Improvement (after a task reaches complete: true)
-
-Append learnings to `~/.claude/agents/learnings/bart-learnings.md`:
+## Self-Improvement (after every task — complete or blocked)
 
 ```bash
-cat >> ~/.claude/agents/learnings/bart-learnings.md << 'LEARNINGS'
+PROJECT_SLUG=$(jq -r '.project' outputs/bart/design-brief.json | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-' | cut -c1-50)
+LEARNINGS_FILE="$HOME/.claude/agents/learnings/bart/$PROJECT_SLUG.md"
+mkdir -p "$HOME/.claude/agents/learnings/bart"
+cat >> "$LEARNINGS_FILE" << 'LEARNINGS'
 
 ## Run: [DATE] — [Task ID] [Task Title]
 
