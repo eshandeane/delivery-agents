@@ -10,81 +10,100 @@ Lisa is the autonomous discovery research agent. This skill creates the `outputs
 
 ---
 
+## On Every Run: Load Agent Memory
+
+Before anything else, silently read `~/.claude/agents/learnings/lisa/meta.md` if it exists. Use it to:
+
+- Recommend sources intelligently rather than asking open-ended (e.g. if meta says circleback is strong for DTM topics, lead with that)
+- Shape how you ask questions (e.g. if narrow briefs with strong hypotheses consistently score better, push for specificity)
+- Surface relevant cross-topic patterns when they apply
+
+Do not show this file to the user.
+
+---
+
 ## Status Check
 
-If the user's message is "status", "lisa status", or just wants to see the last run — show this instead of collecting a new brief:
+If the user's message is "status", "lisa status", or just wants to see the last run:
 
 ```bash
-# Last brief
 cat outputs/lisa/brief.json 2>/dev/null
-
-# Last discovery doc
 ls -t outputs/discovery/*.md 2>/dev/null | head -1
 ```
 
 Print a readable summary:
+
 ```
 Last brief:   [painPoint] ([createdAt])
 Last run doc: [path to most recent discovery doc]
 ```
 
-Then read the most recent discovery doc and extract:
+Read the most recent discovery doc and extract:
+
 - The TL;DR cruxes (top 3)
 - Overall confidence
 - Recommended next action
 
-Print them cleanly. Do not regenerate or re-run anything. End with: "Run `/lisa` to start a new research run."
+Print them cleanly.
+
+**Then check if findings have been written back to per-topic memory.** Derive the slug from the last brief's `painPoint` and check whether `~/.claude/agents/learnings/lisa/<slug>.md` contains a `## Findings` section dated today or after the discovery doc's date. If not, extract the key findings from the discovery doc and append them now:
+
+```markdown
+## Findings: [date]
+
+- **Cruxes:** [top 3 findings]
+- **Hypothesis result:** [validated / invalidated / inconclusive]
+- **Ruled out (new):** [anything the research settled that should carry forward]
+- **Confidence:** [high / medium / low]
+```
+
+Do this silently without asking. Then end with: "Run `/lisa` to start a new research run."
 
 ---
 
-## Step 1: Check for Prior Brief and Ask for Feedback
+## Step 1: Search Prior Work for Topic Overlap
 
-Before collecting a new brief, check whether a prior brief and discovery doc exist on the same or similar topic.
-
-```bash
-ls outputs/lisa/brief.json 2>/dev/null && cat outputs/lisa/brief.json
-ls outputs/discovery/ 2>/dev/null | tail -5
-```
-
-If a prior brief exists:
-- Show a one-line summary: "Last brief: [discoveryGoal] — [createdAt]"
-- Ask: "Was that brief useful?" and wait for the answer
-- Accept any response: useful / wrong focus / too thin / partially / skip
-
-Save the feedback to the topic-scoped learnings file. Derive the slug from the prior brief's `painPoint`:
+Scan for prior runs on the same or related topic:
 
 ```bash
-TOPIC_SLUG=$(echo "<painPoint>" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-' | cut -c1-50)
-LEARNINGS_FILE="~/.claude/agents/learnings/lisa/$TOPIC_SLUG.md"
+ls outputs/lisa/briefs/ 2>/dev/null        # archived briefs
+ls outputs/discovery/ 2>/dev/null          # discovery docs
+ls ~/.claude/agents/learnings/lisa/ 2>/dev/null  # per-topic learnings
 ```
 
-Append to that file:
+If the user's opening message already names a topic, fuzzy-match against archived brief filenames, discovery doc filenames, and learnings slugs. If you find a match:
 
-```markdown
-## PM Feedback: [date]
-- **Rating:** [useful | wrong focus | too thin | partially]
-- **Notes:** [anything the PM added]
-```
+1. Read the matching per-topic learnings file (findings + feedback) and the most recent matching discovery doc
+2. Show a compact summary:
+   ```
+   Found prior work on "[topic]":
+   - [doc filename] ([date])
+   - Key findings: [2-3 cruxes]
+   - Hypothesis was: [validated / invalidated / inconclusive]
+   - What's ruled out: [alreadyRuledOut from findings]
+   ```
+3. Ask: "Build on this, extend it in a new direction, or start fresh?"
+   - **Build on**: carry hypothesis, alreadyRuledOut, and sources forward. Only ask about what's genuinely changed.
+   - **Extend**: same topic, new angle or decision. Carry alreadyRuledOut silently, ask fresh about decision, hypothesis, and scope.
+   - **Start fresh**: clean slate — but carry alreadyRuledOut forward silently. No point re-investigating settled ground.
 
-If no prior brief exists, skip this step entirely and go straight to Step 2.
+If no prior work found, skip to Step 2.
+
+If prior brief exists on a _different_ topic, note it one line ("Last brief was on [topic]") then proceed to Step 2.
 
 ---
 
 ## Step 2: Collect the Brief One Question at a Time
 
-Ask each question one at a time. Wait for the answer before asking the next. Never ask two questions in the same message.
+Ask each question one at a time. Wait for the answer. Never ask two questions in one message. Skip any already answered from prior work or the user's opening message.
 
-Work through these in order:
-
-1. "Who is the target user?" *(e.g. FDE, customer admin, distributor exec)*
-2. "What's the pain point or feature?" *(the specific user problem or feature idea to research — be as concrete as possible)*
-3. "What decision does this inform?" *(e.g. Q2 vs Q3, build vs buy, MVP scope)*
-4. "What do you already believe is true? I'll stress-test this, not just confirm it." *(optional — if they say "not sure" or skip, set hypothesis to null)*
-5. "Anything already ruled out or investigated that Lisa should skip?" *(optional — if nothing, set to null)*
-6. "Full discovery or a narrow question?" *(full = open-ended, unknown solution space; narrow = specific question, one source probably enough. Default: full)*
-7. "Any sources to prioritize? e.g. circleback, slack, web" *(optional — if not specified, default to all connected)*
-
-If the user's opening message already answers some of these, skip those questions and start from the first unanswered one.
+1. "Who is the target user?" _(e.g. FDE, customer admin, distributor exec)_
+2. "What's the pain point or feature?" _(be as concrete as possible)_
+3. "What decision does this inform?" _(e.g. Q2 vs Q3, build vs buy, MVP scope)_
+4. "What do you already believe is true? I'll stress-test this, not just confirm it." _(optional — null if skipped)_
+5. "Anything already ruled out or investigated that Lisa should skip?" _(optional — null if nothing)_
+6. "Full discovery or a narrow question?" _(full = open-ended; narrow = specific question. Default: full)_
+7. Recommend sources based on meta.md — don't ask open-ended. Say: "Based on past runs, I'd route this to [sources] — change anything?" If no prior signal, default to all connected and say so.
 
 ---
 
@@ -97,18 +116,16 @@ Create `outputs/lisa/brief.json`:
   "targetUser": "<role/persona>",
   "painPoint": "<the specific user problem or feature idea>",
   "decision": "<the specific call this informs>",
-  "hypothesis": "<I believe... — or null if not provided>",
-  "alreadyRuledOut": "<what's already settled — or null if not provided>",
+  "hypothesis": "<I believe... — or null>",
+  "alreadyRuledOut": "<what's settled — or null>",
   "scope": "<full|narrow>",
   "prioritySources": ["circleback", "slack", "web"],
   "createdAt": "<YYYY-MM-DD>"
 }
 ```
 
-Also create the output directory:
-
 ```bash
-mkdir -p outputs/lisa
+mkdir -p outputs/lisa outputs/lisa/briefs
 ```
 
 ---
@@ -118,25 +135,89 @@ mkdir -p outputs/lisa
 Print a readable summary:
 
 ```
-Target user:     <targetUser>
-Goal:            <discoveryGoal>
-Decision:        <decision>
-Hypothesis:      <hypothesis or "none provided">
-Already ruled out: <alreadyRuledOut or "nothing specified">
-Scope:           <full|narrow>
-Sources:         <prioritySources>
+Target user:       <targetUser>
+Pain point:        <painPoint>
+Decision:          <decision>
+Hypothesis:        <hypothesis or "none">
+Already ruled out: <alreadyRuledOut or "nothing">
+Scope:             <full|narrow>
+Sources:           <prioritySources>
 ```
 
 Ask: "Does this look right? I'll save the brief once you confirm, then you can run `npm run lisa` to kick off the research."
 
 ---
 
-## Step 5: Save and Launch
+## Step 5: Save, Archive, Update Memory, and Launch
 
-Once confirmed, save the brief file and tell the user:
+Once confirmed:
 
-> "Brief saved to `outputs/lisa/brief.json`. Run this in your terminal to start Lisa:
-> ```
-> npm run lisa
-> ```
-> Tail `outputs/lisa-progress.log` in a second terminal to watch progress as it runs."
+1. **Archive the brief** before overwriting:
+
+   ```bash
+   SLUG=$(echo "<painPoint>" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-' | cut -c1-50)
+   cp outputs/lisa/brief.json outputs/lisa/briefs/$SLUG-<YYYY-MM-DD>.json 2>/dev/null || true
+   ```
+
+2. **Save** `outputs/lisa/brief.json`.
+
+3. **Append to per-topic learnings:**
+
+   ```bash
+   mkdir -p ~/.claude/agents/learnings/lisa
+   ```
+
+   ```markdown
+   ## Brief: [date]
+
+   - **Decision:** [decision]
+   - **Scope:** [full|narrow]
+   - **Hypothesis:** [hypothesis or none]
+   - **Sources:** [prioritySources]
+   - **Mode:** [build-on | extend | fresh]
+   ```
+
+4. **Append to meta.md:**
+
+   ```markdown
+   ## [date] — [targetUser] / [slug]
+
+   - Scope: [full|narrow]
+   - Sources routed: [prioritySources] — [recommended by meta vs user-changed]
+   - Hypothesis quality: [strong / weak / none]
+   - Mode: [build-on | extend | fresh]
+   - Note: [one sentence — e.g. "extend run; carried ruling-out from prior growth-dashboard brief"]
+   ```
+
+5. Tell the user:
+   > "Brief saved. Archived to `outputs/lisa/briefs/[slug]-[date].json`.
+   >
+   > Run this to start Lisa:
+   >
+   > ```
+   > npm run lisa
+   > ```
+   >
+   > Tail `outputs/lisa-progress.log` to watch progress."
+
+---
+
+## Step 6: Post-Run Feedback (when the PM returns after a run)
+
+If the user comes back and mentions the run finished, or shares feedback on the output:
+
+Ask: "Was the research useful?" Accept: useful / wrong focus / too thin / partially / skip.
+
+If the rating is anything other than "useful", ask one follow-up: "What specifically was off — the hypothesis, the sources, or the scope?"
+
+Save both to the per-topic learnings file:
+
+```markdown
+## PM Feedback: [date]
+
+- **Rating:** [useful | wrong focus | too thin | partially]
+- **What was off:** [hypothesis | sources | scope | n/a]
+- **Notes:** [anything the PM added]
+```
+
+Then update meta.md with a one-line pattern observation so future briefs on similar topics route better.
