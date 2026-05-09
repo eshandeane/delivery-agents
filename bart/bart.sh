@@ -165,6 +165,52 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     echo "  Completed at iteration $i of $MAX_ITERATIONS — $(date)"
     echo "  Screenshots: outputs/bart/screenshots/"
     echo "================================================================"
+
+    # ---- Post to Linear if issue ID is set ----
+    LINEAR_ISSUE_ID=$(jq -r '.linearIssueId // empty' "$BRIEF_FILE" 2>/dev/null)
+    ENV_FILE="$HOME/.lisa-env"
+    if [ -f "$ENV_FILE" ]; then source "$ENV_FILE"; fi
+
+    if [ -n "$LINEAR_ISSUE_ID" ] && [ -n "$LINEAR_API_KEY" ]; then
+      echo "  Posting design summary to Linear $LINEAR_ISSUE_ID..."
+
+      # Build task summary
+      TASK_SUMMARY=$(jq -r '.designTasks[] | "- **\(.id)** — \(.title) (`\(.page)`)"' "$BRIEF_FILE" 2>/dev/null)
+
+      COMMENT="Bart has completed the prototype for **$PROJECT_NAME**.
+
+## Design Tasks Completed
+
+$TASK_SUMMARY
+
+## Next Step
+
+Review the prototype in the codebase on branch \`$BRANCH_NAME\`. When happy with the design, move this ticket to **Design Review** and decide on your solution before handing to Marge."
+
+      COMMENT_JSON=$(printf '%s' "$COMMENT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))")
+
+      # Get the internal issue ID from Linear using the identifier (e.g. FDE-12)
+      TEAM_KEY=$(echo "$LINEAR_ISSUE_ID" | sed 's/-[0-9]*//')
+      ISSUE_NUM=$(echo "$LINEAR_ISSUE_ID" | sed 's/.*-//')
+      ISSUES_RESPONSE=$(curl -s -X POST \
+        -H "Authorization: $LINEAR_API_KEY" \
+        -H "Content-Type: application/json" \
+        --data "{\"query\":\"{ issues(filter: { team: { key: { eq: \\\"$TEAM_KEY\\\" } }, number: { eq: $ISSUE_NUM } }) { nodes { id } } }\"}" \
+        https://api.linear.app/graphql)
+      INTERNAL_ID=$(echo "$ISSUES_RESPONSE" | jq -r '.data.issues.nodes[0].id // empty')
+
+      if [ -n "$INTERNAL_ID" ]; then
+        curl -s -X POST \
+          -H "Authorization: $LINEAR_API_KEY" \
+          -H "Content-Type: application/json" \
+          --data "{\"query\":\"mutation { commentCreate(input: { issueId: \\\"$INTERNAL_ID\\\", body: $COMMENT_JSON }) { success } }\"}" \
+          https://api.linear.app/graphql > /dev/null
+        echo "  Comment posted to $LINEAR_ISSUE_ID"
+      else
+        echo "  Could not resolve $LINEAR_ISSUE_ID to an internal ID — skipping Linear comment"
+      fi
+    fi
+
     exit 0
   fi
 

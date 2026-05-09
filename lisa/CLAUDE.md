@@ -224,7 +224,8 @@ echo "[Lisa]   Phase 12 (Solution space): <run | skip — PM said prototype alre
 ```
 
 Rules for skipping:
-- Skip Phase 4 only if the brief says a prototype already exists AND there's no codebase integration question
+- Skip Phase 3 (Web) if `prioritySources` in the brief does NOT include `"web"`
+- Skip Phase 4 (Codebase) if `prioritySources` in the brief does NOT include `"codebase"`, OR if the brief says a prototype already exists AND there's no codebase integration question
 - Skip Phase 6 only if stakeholders are fully named and aligned in the brief
 - Skip Phase 7 only if zero workaround signals appeared in Phase 2 evidence
 - Skip Phase 12 only if `alreadyRuledOut` covers the solution space
@@ -262,11 +263,21 @@ Use Grep/Glob/Read to find:
 - Existing data models that would need to change
 - Prior implementations that could be extended
 
-Assess implementation complexity as Low / Medium / High with a one-line rationale. Reference specific file paths.
+**Read, don't just find.** After locating relevant files, read the 2–3 most important ones with the Read tool before assessing complexity or making any architectural claim. Finding a file path is not evidence of how it works.
+
+Rules for codebase claims:
+- "This uses client-side filtering" — must reference specific lines you read showing `useState` / `useMemo` filter logic
+- "This requires a schema change" — must reference the Prisma model or migration file you read
+- "This is server-side" — must reference a server component, API route, or query param you read
+- "This pattern already exists" — must reference the file and function/component name you read
+
+If a file can't be found or its architecture is ambiguous after reading, flag it as an open question — do not assert a claim you can't back with read evidence.
+
+Assess implementation complexity as Low / Medium / High with a one-line rationale referencing specific files and what you read in them.
 
 ```bash
 echo "[Lisa] Phase 4: Codebase — related files: <list>" | tee -a outputs/lisa-progress.log
-echo "[Lisa] Phase 4: done — complexity: <L/M/H>, key files: <N>" | tee -a outputs/lisa-progress.log
+echo "[Lisa] Phase 4: done — complexity: <L/M/H>, key files: <N>, files read: <N>" | tee -a outputs/lisa-progress.log
 ```
 
 ---

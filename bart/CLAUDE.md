@@ -49,6 +49,8 @@ You are building the UI directly (no sub-agent dispatch in print mode).
 - Check `@/components/ui` for available shadcn/ui components
 - Review existing pages on the target URL path for layout patterns
 
+**Read before reusing or deciding a pattern doesn't exist.** After grepping, read the most relevant 1–2 files you found. Don't infer how a component works from its name or folder — open it. If you're about to write a new component, confirm no similar one exists by reading the closest grep match first. Listing a file path is not the same as knowing what it does.
+
 **Build the component:**
 
 - Use mock data by default — add `TODO for Engineer:` comments where real data is needed

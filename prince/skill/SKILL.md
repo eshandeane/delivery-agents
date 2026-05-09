@@ -6,7 +6,7 @@ user-invocable: true
 
 # Prince — Acceptance Test Runner
 
-Prince is the autonomous acceptance testing agent. This skill finds the right PRD and launches Prince to test it.
+Prince is the autonomous acceptance testing agent. This skill finds the right PRD, generates a brief, and tells you to run `npm run prince`.
 
 ---
 
@@ -22,20 +22,50 @@ If multiple PRDs are found, list them and ask which one to test. If one is found
 
 ---
 
-## Step 2: Confirm and Launch
+## Step 2: Get context
 
-Show the user:
-```
-PRD:    <path>
-Branch: <current branch>
+```bash
+git branch --show-current
 ```
 
-Ask: "Ready to run Prince against this PRD?"
+Extract the feature name from the PRD filename or the `# PRD:` heading inside the file.
 
-Once confirmed, tell the user:
+---
 
-> "Run this in your terminal to start Prince:
+## Step 3: Write the brief
+
+Write `outputs/prince/brief.json`:
+
+```bash
+mkdir -p outputs/prince
+```
+
+```json
+{
+  "prdFile": "<relative path to PRD from project root>",
+  "feature": "<feature name from PRD title>",
+  "branch": "<current branch name>",
+  "createdAt": "<today's date as YYYY-MM-DD>"
+}
+```
+
+---
+
+## Step 4: Confirm and launch
+
+Show the user a summary:
+
+```
+Feature: <feature name>
+PRD:     <prd path>
+Branch:  <branch>
+Brief:   outputs/prince/brief.json
+```
+
+Then tell the user:
+
+> "Brief saved. Run this in your terminal to start Prince:
 > ```
-> npm run prince -- <prd-path>
+> npm run prince
 > ```
-> Tail `outputs/prince-progress.log` in a second terminal to watch progress."
+> Prince will read `outputs/prince/brief.json`, set up the test environment, and stream progress live."

@@ -3,13 +3,15 @@
 # Usage:
 #   1. Run /lisa in Claude Code to generate a brief
 #   2. npm run lisa
+#   3. npm run lisa -- --brief <slug>
 
 set -e
+
+export PATH="/usr/local/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(pwd)"
 PROMPT_FILE="$SCRIPT_DIR/CLAUDE.md"
-BRIEF_FILE="$PROJECT_DIR/outputs/lisa/brief.json"
 PROGRESS_FILE="$PROJECT_DIR/outputs/lisa-progress.log"
 
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then
@@ -17,10 +19,56 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
   exit 0
 fi
 
+# ---- Parse --brief flag ----
+BRIEF_SLUG=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --brief)
+      BRIEF_SLUG="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+# ---- Resolve brief file ----
+if [ -n "$BRIEF_SLUG" ]; then
+  BRIEF_FILE="$PROJECT_DIR/outputs/lisa/${BRIEF_SLUG}-brief.json"
+else
+  BRIEFS=("$PROJECT_DIR"/outputs/lisa/*-brief.json)
+  if [ ${#BRIEFS[@]} -eq 0 ] || [ ! -f "${BRIEFS[0]}" ]; then
+    echo ""
+    echo "No briefs found in outputs/lisa/"
+    echo ""
+    echo "Run /lisa in Claude Code to generate one first:"
+    echo "  /lisa should we build X for Y? decide for Q2 roadmap."
+    echo ""
+    exit 1
+  elif [ ${#BRIEFS[@]} -eq 1 ]; then
+    BRIEF_FILE="${BRIEFS[0]}"
+    echo "Using brief: $(basename "$BRIEF_FILE")"
+  else
+    echo ""
+    echo "Multiple briefs found. Select one:"
+    echo ""
+    select f in "${BRIEFS[@]}"; do
+      if [ -n "$f" ]; then
+        BRIEF_FILE="$f"
+        break
+      else
+        echo "Invalid selection. Try again."
+      fi
+    done
+    echo ""
+  fi
+fi
+
 # ---- Check for brief ----
 if [ ! -f "$BRIEF_FILE" ]; then
   echo ""
-  echo "No brief found at outputs/lisa/brief.json"
+  echo "No brief found at $BRIEF_FILE"
   echo ""
   echo "Run /lisa in Claude Code to generate one first:"
   echo "  /lisa should we build X for Y? decide for Q2 roadmap."
@@ -29,7 +77,7 @@ if [ ! -f "$BRIEF_FILE" ]; then
 fi
 
 TARGET_USER=$(jq -r '.targetUser // "Unknown"' "$BRIEF_FILE" 2>/dev/null || echo "Unknown")
-GOAL=$(jq -r '.discoveryGoal // "Unknown"' "$BRIEF_FILE" 2>/dev/null || echo "Unknown")
+GOAL=$(jq -r '.discoveryGoal // .painPoint // "Unknown"' "$BRIEF_FILE" 2>/dev/null || echo "Unknown")
 DECISION=$(jq -r '.decision // "Unknown"' "$BRIEF_FILE" 2>/dev/null || echo "Unknown")
 SCOPE=$(jq -r '.scope // "full"' "$BRIEF_FILE" 2>/dev/null || echo "full")
 CREATED_AT=$(jq -r '.createdAt // ""' "$BRIEF_FILE" 2>/dev/null || echo "")
@@ -42,8 +90,8 @@ if [ -n "$CREATED_AT" ]; then
 
   if [ "$AGE_DAYS" -ge 2 ]; then
     echo ""
-    echo "  ⚠️  Brief is $AGE_DAYS days old (created $CREATED_AT)."
-    echo "     Run /lisa to generate a fresh brief, or continue with the existing one."
+    echo "  Brief is $AGE_DAYS days old (created $CREATED_AT)."
+    echo "  Run /lisa to generate a fresh brief, or continue with the existing one."
     echo ""
     read -r -p "  Continue anyway? (y/N) " CONFIRM
     if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
@@ -57,7 +105,6 @@ fi
 mkdir -p "$PROJECT_DIR/outputs/discovery" "$HOME/.claude/agents/learnings"
 cd "$PROJECT_DIR"
 
-# Reset the progress log so tail -f sees only this run's lines.
 : > "$PROGRESS_FILE"
 
 TAIL_PID=""
@@ -109,7 +156,7 @@ BRIEF=$(cat "$BRIEF_FILE")
   echo "## Slack Config"
   echo "slackEmail: $SLACK_EMAIL"
   echo "slackChannel: $SLACK_CHANNEL"
-} | claude --model sonnet --dangerously-skip-permissions --print 2>&1
+} | claude --model haiku --dangerously-skip-permissions --print 2>&1
 
 sleep 0.3
 kill "$TAIL_PID" 2>/dev/null || true

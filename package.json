@@ -1,7 +1,13 @@
 {
   "name": "delivery-agents",
   "version": "1.0.0",
-  "description": "Lisa, Bart, and Prince — three Claude Code agents for the full PM-to-shipped-feature cycle",
+  "description": "Lisa, Marge, Bart, Ralph, and Prince — autonomous agents for the full PM-to-shipped-feature cycle",
+  "scripts": {
+    "lisa": "bash lisa/lisa.sh",
+    "marge": "bash marge/marge.sh",
+    "bart": "bash bart/bart.sh",
+    "prince": "bash prince/prince.sh"
+  },
   "bin": {
     "delivery-agents": "./bin/install.js"
   },
@@ -11,6 +17,7 @@
     "skills/",
     "personas/",
     "bin/",
+    "marge/",
     "README.md"
   ],
   "keywords": [

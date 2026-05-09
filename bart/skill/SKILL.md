@@ -17,6 +17,7 @@ Read the user's description of what to prototype. If it's vague, ask up to 3 cla
 - **What page(s) is this on?** (URL path or page name)
 - **What are the key components?** (cards, tables, charts, modals?)
 - **Any constraints?** (must reuse existing components, specific layout, mobile priority?)
+- **Do you have a Linear issue ID for this?** (e.g. FDE-142 — optional, skip if not using Linear)
 
 If the description is clear enough, skip straight to Step 2.
 
@@ -37,6 +38,7 @@ Break the request into discrete design tasks — one task per distinct component
   "project": "<Feature Name>",
   "branchName": "bart/<feature-name>",
   "description": "<1-2 sentence description of what's being designed and why>",
+  "linearIssueId": "<issue ID or null>",
   "designTasks": [
     {
       "id": "DT-001",
