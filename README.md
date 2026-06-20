@@ -10,7 +10,7 @@ The pipeline runs: **Homer → Lisa → (you decide) → Marge → Bart → Prin
 |---|---|---|---|
 | **Homer** | Orchestrator — scans Jira Roadmap + Design tickets, judges readiness, triggers Lisa or Bart | `/homer` in Claude Code, or scheduled via launchd 3×/day (08:00, 12:00, 16:00) | Outer schedule loop + per-ticket eval loop |
 | **Lisa** | Discovery research — synthesizes the pain point from Circleback, Slack, and Gmail into a structured discovery brief | `/lisa` → `npm run lisa`, or called by Homer | One-shot per brief |
-| **Marge** | PRD writing — turns an approved discovery doc + your solution decision into a PRD | `/marge` → `npm run marge` | One-shot |
+| **Marge** | PRD writing — turns an approved discovery doc + your solution decision into a PRD, then pressure-tests it via a 7-perspective review panel | `/marge` → `npm run marge` | Up to 2 review/revise cycles |
 | **Bart** | UI/UX prototyping — builds, reviews, and iterates on frontend components in a dedicated git worktree | `/bart` → `npm run bart`, or called by Homer with `--ticket FDE-XXX` | **Internal loop, up to 15 iterations** |
 | **Prince** | Acceptance testing — reads a PRD, drives the browser through every criterion, produces a pass/fail report | `/prince` → `npm run prince -- path/to/prd.md` | Auto-fix loop on failure |
 
@@ -74,14 +74,20 @@ Lisa is most often invoked by Homer after Homer judges that a Roadmap ticket has
 
 ### Marge — PRD Writing
 
-Takes an approved discovery doc plus your solution decision and writes a full PRD. Asks clarifying questions first if anything is ambiguous, then drafts the PRD, runs a self-review skill against it, and updates based on the feedback.
+Takes an approved discovery doc plus your solution decision and writes a full PRD, then pressure-tests it through a 7-perspective review panel.
 
 ```bash
 /marge                              # generate a brief (in Claude Code)
 npm run marge -- --feature <slug>   # write the PRD
 ```
 
-One-shot per run; no iteration loop.
+**The flow:**
+1. Invokes the `/prd` skill to draft the PRD, feeding it the solution decision plus any Lisa / Bart context.
+2. Invokes the `/prd-review-panel` skill on the draft. The panel runs 7 reviewers in parallel — engineering, design, exec, legal, UXR, skeptic, customer voice — and returns a consolidated list of must-fix issues and suggestions.
+3. Resolves every must-fix issue inline, then re-runs the panel. **Maximum 2 revision cycles.** Anything still unresolved after cycle 2 is logged in an `## Open Questions` section and the PRD ships anyway.
+4. Suggestions (non-blocking) are appended at the bottom of the PRD under `## Panel Suggestions (Deferred)`.
+
+The review panel is what makes Marge worth running over a stock PRD generator — Eshan's 7 sub-agents catch class-of-issue gaps that any single reviewer would miss.
 
 ---
 
@@ -95,14 +101,23 @@ npm run bart   # run the prototyping loop
 ```
 
 **The loop (`bart.sh:174`):**
-- For up to **15 iterations**:
-  1. Pick the next incomplete, non-blocked design task from the brief (sorted by priority).
-  2. Spawn a fresh `claude --model sonnet` session with the task + phase + accumulated `bart-learnings.md` as context.
-  3. Run the phase (build, review, or fix), tail `bart-progress.log` for live output.
-  4. Check the output for a `<promise>COMPLETE</promise>` sentinel.
-     - **Found** → all tasks done, push the branch, post a "Bart is done" Jira comment, exit.
-     - **Not found** → mark the phase done in the brief, pick up the next phase, loop.
-- Each iteration is a brand-new Claude session. Cross-iteration memory lives in `bart-learnings.md`. Tasks can self-mark `phase: "blocked"` to drop out of the queue.
+
+For up to **15 iterations**, Bart picks the next incomplete, non-blocked design task from the brief and runs one phase against it in a fresh Claude session.
+
+**Each task moves through these phases:**
+1. **`build`** — Before writing code, Bart invokes the `/frontend-design` and `/userinterface-wiki` skills for design-quality guidance and UI rules. Then it builds, verifies in the browser via `/agent-browser`, and moves the task to `review`.
+2. **`review`** — Bart scores the UI across 5 dimensions, **each requiring a concrete browser action before the score is assigned**:
+   - **Visual clarity** — take a screenshot, evaluate layout / hierarchy / scannability.
+   - **Interaction** — drive the actual interaction in the browser.
+   - **Consistency** — compare against the FDE Design System checklist.
+   - **Accessibility** — keyboard nav, ARIA, contrast.
+   - **Responsive** — resize the viewport.
+
+   Scores are 1–5 per dimension. All scores ≥4 AND every checklist item passes → `phase: done`. Any score ≤3 → `phase: iterate` with specific fixes listed.
+3. **`iterate`** — Read the `## Fixes Needed` from the last review entry, re-invoke `/userinterface-wiki` for the dimensions that scored low, apply the fixes, then back to `review`. If the same dimension scores ≤3 across 2+ consecutive reviews, Bart marks it as a recurring blocker rather than retrying the same fix.
+4. **`done`** or **`blocked`** — Done when scores pass; blocked after 10+ review/iterate cycles on the same task without passing.
+
+Cross-iteration memory lives in `bart-learnings.md`. The outer loop exits early when the brief signals `<promise>COMPLETE</promise>`.
 
 **Ticket mode** (when called by Homer with `--ticket FDE-XXX`):
 - Creates a worktree at `<repo>--worktrees/bart-<ticket>` on the branch named in the brief.
