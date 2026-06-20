@@ -156,7 +156,7 @@ BRIEF=$(cat "$BRIEF_FILE")
   echo "## Slack Config"
   echo "slackEmail: $SLACK_EMAIL"
   echo "slackChannel: $SLACK_CHANNEL"
-} | claude --model haiku --dangerously-skip-permissions --print 2>&1
+} | claude --model sonnet --dangerously-skip-permissions --print 2>&1
 
 sleep 0.3
 kill "$TAIL_PID" 2>/dev/null || true

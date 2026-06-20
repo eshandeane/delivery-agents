@@ -117,25 +117,92 @@ fi
 
 If a prior run was loaded, produce a **Diff from Prior Run** section in the output doc (see Phase 14 template).
 
+**Load cross-topic meta patterns:**
+
+```bash
+META_FILE="$HOME/.claude/agents/learnings/lisa/meta.md"
+if [ -f "$META_FILE" ]; then
+  echo "[Lisa] Phase 0: Loading cross-topic meta patterns" | tee -a outputs/lisa-progress.log
+  cat "$META_FILE"
+else
+  echo "[Lisa] Phase 0: No meta.md yet — will seed it in Phase 15" | tee -a outputs/lisa-progress.log
+fi
+```
+
+Read all entries in `meta.md`. For every entry that matches the current `targetUser` or topic domain, extract and explicitly log what you are carrying forward — do not apply anything silently:
+
+```bash
+echo "[Lisa] Phase 0: Applying from meta:" | tee -a outputs/lisa-progress.log
+# For each thing carried forward, one line:
+echo "[Lisa]   <type>: <what> — reason: <N prior runs / specific pattern>" | tee -a outputs/lisa-progress.log
+# Examples:
+# "[Lisa]   Skip web: 3 prior growth-manager runs returned noise — skipping Phase 3 unless brief requests it"
+# "[Lisa]   Add keyword 'adoption goal': worked in 2 prior runs for this user type"
+# "[Lisa]   Drop keyword 'manual upload': returned unrelated distributor ops in 2 runs"
+# "[Lisa]   Source priority: Circleback first — strongest signal for DTM/growth topics"
+echo "[Lisa]   (nothing to apply from meta)" | tee -a outputs/lisa-progress.log  # if no matching entries
+```
+
+Three things to carry forward:
+- **Source quality** → reprioritize or skip sources based on what `meta.md` shows for this user type or topic domain
+- **Keywords** → add terms that worked in prior runs; explicitly drop terms flagged as noise
+- **Scope** → if meta shows a pattern (e.g., narrow runs consistently outperform full for this user type), note it when building the phase plan
+
+**One-time check for legacy flat learnings file:**
+
+```bash
+LEGACY_FILE="$HOME/.claude/agents/learnings/lisa-learnings.md"
+if [ -f "$LEGACY_FILE" ]; then
+  echo "[Lisa] Phase 0: Legacy lisa-learnings.md found — reading for relevant patterns" | tee -a outputs/lisa-progress.log
+  cat "$LEGACY_FILE"
+fi
+```
+
+If the legacy file exists, silently scan it for entries matching the current `targetUser` or `painPoint` and apply any relevant source quality, keyword, or persona notes.
+
 ---
 
 ## Phase 1: Keyword Extraction
 
-Before searching anything, derive the search terms. Log them so the search strategy is visible and debuggable.
+Before generating any search terms, do a conceptual framing step:
 
-From `painPoint`, `targetUser`, and `hypothesis`, extract **5–10 keywords and phrases**:
-- Include the user role (e.g., "growth manager", "FDE")
-- Include the problem domain (e.g., "adoption tracking", "weekly status report")
-- Include the job outcome (e.g., "sync prep", "portfolio health")
-- Include at least one keyword from how users describe the pain, not the feature name
-- If a hypothesis was provided, derive keywords that would either confirm or challenge it
-- Avoid keywords so broad they return noise (e.g., "dashboard", "report" alone)
+**Step 1 — Understand the problem in the user's voice:**
+
+Read `painPoint`, `targetUser`, and `hypothesis`. Answer these three questions internally (do not output them):
+1. What is the `targetUser` actually trying to accomplish? (outcome, not feature)
+2. What breaks or slows down today when this is missing? (the friction, in their words)
+3. If this user mentioned this pain in a meeting, what would they say? (first-person, outcome-oriented)
+
+This framing drives everything below. Do not skip it.
+
+**Step 2 — Generate source-specific keyword sets:**
+
+Each source speaks a different language. Generate a separate set for each:
+
+- **Circleback** (5-8 terms): First-person, outcome-oriented, meeting language. How would the `targetUser` describe this pain out loud? Include stakeholder names from the brief if present. Include the job outcome (e.g., "hit 80%", "prep for sync", "accounts at risk") not just the feature name. If a hypothesis was provided, include 1-2 terms designed to find counter-evidence, not just confirming signals.
+- **Slack** (3-5 terms): Short phrases. What would a team member post after a customer call about this? Channel-aware — if the `targetUser` maps to a known team or channel, include their shorthand.
+- **Codebase** (3-5 terms): Technical names. Component names, Prisma model fields, hook or service names that likely relate to this feature area.
+- **Web** (2-3 terms): Industry/product terminology for competitive research. Formal, category-level.
+
+For each set, also flag **1-2 noise terms** — words that seem relevant but are likely to return off-topic results. Apply meta.md patterns from Phase 0 to seed or prune these lists.
 
 ```bash
-echo "[Lisa] Phase 1: Keywords: <kw1>, <kw2>, <kw3>, ..." | tee -a outputs/lisa-progress.log
+echo "[Lisa] Phase 1: Circleback keywords: <list>" | tee -a outputs/lisa-progress.log
+echo "[Lisa] Phase 1: Slack keywords: <list>" | tee -a outputs/lisa-progress.log
+echo "[Lisa] Phase 1: Codebase keywords: <list>" | tee -a outputs/lisa-progress.log
+echo "[Lisa] Phase 1: Web keywords: <list>" | tee -a outputs/lisa-progress.log
+echo "[Lisa] Phase 1: Noise terms (excluded): <list>" | tee -a outputs/lisa-progress.log
 ```
 
-These keywords drive all searches in Phases 2 and 3. Do not deviate without logging why.
+**Step 3 — Semantic synonyms:**
+
+For each Circleback keyword, add 1-2 alternate phrasings that mean the same thing in different words (e.g., "adoption goal" → "hit their number", "account threshold"). These expand the relevance gate in Phase 2 without adding extra searches.
+
+```bash
+echo "[Lisa] Phase 1: Synonym expansions: <kw> → <alt1>, <alt2> | ..." | tee -a outputs/lisa-progress.log
+```
+
+These keyword sets drive all searches in Phases 2 and 3. Each source uses its own set. Do not deviate without logging why.
 
 ---
 
@@ -145,12 +212,14 @@ These keywords drive all searches in Phases 2 and 3. Do not deviate without logg
 
 Search every connected MCP using the keywords from Phase 1. For each source, log the query, result count, and top finding. If a source isn't connected, log it and move on — do not invent findings.
 
+Use the source-specific keyword sets from Phase 1 — not one shared list. Each source gets the terms calibrated for how it speaks.
+
 **Priority order:**
-1. **Circleback** (meeting transcripts — primary user voice) — search each keyword, extract direct quotes with meeting ID and date
-2. **Slack** — search relevant channels, extract messages with timestamps
-3. **Gmail** — search for relevant threads
-4. **Confluence** — search for relevant pages
-5. **`context-library/research/competitive-*.md`** — check for prior competitor analyses before doing web research
+1. **Circleback** (meeting transcripts — primary user voice) — use Circleback keywords from Phase 1. For each keyword, run one search. Extract direct quotes with meeting ID and date. Do not re-run searches with generic terms already flagged as noise in Phase 1.
+2. **Slack** — use Slack keywords from Phase 1. Search relevant channels first (channels associated with the `targetUser` type), then expand if results are thin.
+3. **Gmail** — use Circleback keywords (meeting language transfers). Only search if `prioritySources` includes `"gmail"`.
+4. **Confluence** — use Slack keywords (short, team-oriented). Only search if `prioritySources` includes `"confluence"`.
+5. **`context-library/research/competitive-*.md`** — check for prior competitor analyses before doing web research.
 
 ```bash
 echo "[Lisa] Phase 2: MCP gathering — sources: <list connected sources>" | tee -a outputs/lisa-progress.log
@@ -160,7 +229,16 @@ echo "[Lisa]   Circleback: '<keyword>' → N results — top: <finding>" | tee -
 
 Collect all evidence into a working set. Every piece of evidence must have: source, date, quote or summary.
 
+**Relevance gate — run before adding any result to the evidence set:**
+
+For each result returned by any source, confirm it matches at least one Phase 1 keyword **or its synonym expansions** from Step 3 of Phase 1. If a result does not match any keyword or synonym:
+- Either discard it and log: `[Lisa]   Discarded: "<source>" — no keyword match (<reason>)`
+- Or include it with an explicit flag: `[Lisa]   Including off-topic: "<source>" — reason: <one-line justification>` (use sparingly — only when the result is directly about the `targetUser` or `decision` even if no keywords appear)
+
+Do not include results just because the source returned them.
+
 ```bash
+echo "[Lisa] Phase 2: Relevance gate applied — N included, N discarded" | tee -a outputs/lisa-progress.log
 echo "[Lisa] Phase 2: done — N quotes from Circleback, N Slack messages, N other" | tee -a outputs/lisa-progress.log
 ```
 
@@ -258,10 +336,14 @@ echo "[Lisa] Phase 3: done — N URLs fetched, N useful findings" | tee -a outpu
 
 Now that evidence has shaped what to look for, search the codebase for related code.
 
+Use the Phase 1 codebase keywords as the explicit search anchor — every Grep pattern and Glob glob must derive directly from one of those terms. Do not explore files based on intuition about what "might be related."
+
 Use Grep/Glob/Read to find:
-- Components, services, or hooks related to the feature area
-- Existing data models that would need to change
-- Prior implementations that could be extended
+- Components, services, or hooks whose filenames or contents match Phase 1 codebase keywords
+- Existing data models (Prisma schema, migration files) that reference Phase 1 keyword terms
+- Prior implementations that share a Phase 1 keyword in their function/component name or file path
+
+If a file is found that doesn't clearly match a Phase 1 keyword, log why it's included before reading it: `[Lisa]   Reading <file> — connected to keyword "<kw>" via <reason>`. If you can't state the connection, skip the file.
 
 **Read, don't just find.** After locating relevant files, read the 2–3 most important ones with the Read tool before assessing complexity or making any architectural claim. Finding a file path is not evidence of how it works.
 
@@ -669,6 +751,33 @@ cat >> "$LEARNINGS_FILE" << 'LEARNINGS'
 LEARNINGS
 
 echo "[Lisa] Phase 15: learnings written to $LEARNINGS_FILE" | tee -a outputs/lisa-progress.log
+```
+
+**Update cross-topic meta.md:**
+
+```bash
+META_FILE="$HOME/.claude/agents/learnings/lisa/meta.md"
+mkdir -p "$HOME/.claude/agents/learnings/lisa"
+```
+
+Append a single entry to `meta.md`:
+
+```markdown
+## <DATE> — <targetUser> / <slug>
+
+- Scope: <full|narrow>
+- Sources routed: <prioritySources> — <note any reprioritization applied from prior meta patterns>
+- Hypothesis outcome: <on track | challenged | unclear>
+- Best source: <which MCP/file gave most signal>
+- Weakest source: <which produced little/none>
+- Keywords that worked: <list>
+- Keywords that produced noise or nothing: <list>
+- Relevance gate: <N discarded / N off-topic-included>
+- Note: <one sentence — anything surprising or worth carrying to future runs on this user type or topic domain>
+```
+
+```bash
+echo "[Lisa] Phase 15: meta.md updated" | tee -a outputs/lisa-progress.log
 ```
 
 ---

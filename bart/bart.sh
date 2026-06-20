@@ -9,7 +9,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 PROMPT_FILE="$SCRIPT_DIR/CLAUDE.md"
-BRIEF_FILE="$PROJECT_DIR/outputs/bart/design-brief.json"
 PROGRESS_LOG="$PROJECT_DIR/outputs/bart/bart-progress.log"
 MAX_ITERATIONS=15
 
@@ -18,21 +17,61 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
   exit 0
 fi
 
-# ---- Check for design brief ----
-if [ ! -f "$BRIEF_FILE" ]; then
+# ---- Resolve brief file ----
+BRIEF_FILE=""
+BRIEFS=("$PROJECT_DIR"/outputs/bart/*-brief.json)
+
+if [ ${#BRIEFS[@]} -eq 0 ] || [ ! -f "${BRIEFS[0]}" ]; then
   echo ""
-  echo "No design brief found at outputs/bart/design-brief.json"
+  echo "No design briefs found in outputs/bart/"
   echo ""
   echo "Run /bart in Claude Code to generate one first:"
   echo "  /bart build a <description of what to prototype>"
   echo ""
   exit 1
+elif [ ${#BRIEFS[@]} -eq 1 ]; then
+  BRIEF_FILE="${BRIEFS[0]}"
+  echo "Using brief: $(basename "$BRIEF_FILE")"
+else
+  echo ""
+  echo "Multiple briefs found. Select one:"
+  echo ""
+  select f in "${BRIEFS[@]}"; do
+    if [ -n "$f" ]; then
+      BRIEF_FILE="$f"
+      break
+    else
+      echo "Invalid selection. Try again."
+    fi
+  done
+  echo ""
 fi
 
-# ---- Preflight: required skills ----
+PROJECT_NAME=$(jq -r '.project // "Unknown"' "$BRIEF_FILE" 2>/dev/null || echo "Unknown")
+BRANCH_NAME=$(jq -r '.branchName // "unknown"' "$BRIEF_FILE" 2>/dev/null || echo "unknown")
+TASK_COUNT=$(jq '.designTasks | length' "$BRIEF_FILE" 2>/dev/null || echo "?")
+
+# Scoped learnings — per project, not global
+PROJECT_SLUG=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-' | cut -c1-50)
+LEARNINGS_FILE="$HOME/.claude/agents/learnings/bart/$PROJECT_SLUG.md"
+mkdir -p "$HOME/.claude/agents/learnings/bart"
+
+# ---- Worktree bootstrap ----
+# Bart always runs inside .worktrees/ so it cannot trample your main checkout.
+# If invoked from main, bootstrap a worktree and re-exec inside it.
+
+GIT_TOPLEVEL=$(git -C "$PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "")
+GIT_COMMON_DIR=$(git -C "$PROJECT_DIR" rev-parse --git-common-dir 2>/dev/null || echo "")
+case "$GIT_COMMON_DIR" in
+  /*) ;;
+  *) GIT_COMMON_DIR="$GIT_TOPLEVEL/$GIT_COMMON_DIR" ;;
+esac
+MAIN_REPO=$(cd "$GIT_COMMON_DIR/.." 2>/dev/null && pwd || echo "")
+
+# ---- Preflight: required skills (checked against main repo) ----
 MISSING_SKILLS=()
 for SKILL in frontend-design userinterface-wiki; do
-  if [ ! -f "$PROJECT_DIR/.claude/skills/$SKILL/SKILL.md" ]; then
+  if [ ! -f "$MAIN_REPO/.claude/skills/$SKILL/SKILL.md" ]; then
     MISSING_SKILLS+=("$SKILL")
   fi
 done
@@ -49,28 +88,61 @@ if [ ${#MISSING_SKILLS[@]} -gt 0 ]; then
   exit 1
 fi
 
-PROJECT_NAME=$(jq -r '.project // "Unknown"' "$BRIEF_FILE" 2>/dev/null || echo "Unknown")
-BRANCH_NAME=$(jq -r '.branchName // "unknown"' "$BRIEF_FILE" 2>/dev/null || echo "unknown")
-TASK_COUNT=$(jq '.designTasks | length' "$BRIEF_FILE" 2>/dev/null || echo "?")
+if [ "$GIT_TOPLEVEL" = "$MAIN_REPO" ]; then
+  # Running from main repo — bootstrap a worktree and re-exec inside it.
+  WORKTREE_NAME=$(echo "$BRANCH_NAME" | sed 's|/|-|g')
+  WORKTREE_PATH="$MAIN_REPO/.worktrees/$WORKTREE_NAME"
 
-# Scoped learnings — per project, not global
-PROJECT_SLUG=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-' | cut -c1-50)
-LEARNINGS_FILE="$HOME/.claude/agents/learnings/bart/$PROJECT_SLUG.md"
-mkdir -p "$HOME/.claude/agents/learnings/bart"
+  if [ ! -d "$WORKTREE_PATH" ]; then
+    echo "Bootstrapping worktree at .worktrees/$WORKTREE_NAME (branch $BRANCH_NAME)..."
+    git fetch origin dev || echo "Warning: could not fetch origin/dev"
 
-# ---- Branch check ----
-CURRENT_BRANCH=$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || echo "")
-if [ "$CURRENT_BRANCH" != "$BRANCH_NAME" ]; then
-  echo "  Branch mismatch: on '$CURRENT_BRANCH', expected '$BRANCH_NAME'"
-  if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
-    echo "  Checking out: $BRANCH_NAME"
-    git -C "$PROJECT_DIR" checkout "$BRANCH_NAME"
+    # Guard: git won't allow a worktree on a branch already checked out in the main repo
+    MAIN_CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+    if [ "$MAIN_CURRENT_BRANCH" = "$BRANCH_NAME" ]; then
+      echo ""
+      echo "Error: main repo is already on branch '$BRANCH_NAME'."
+      echo "Switch to another branch first, then re-run:"
+      echo "  git checkout dev && npm run bart"
+      echo ""
+      exit 1
+    fi
+
+    if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME" \
+       || git show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
+      git worktree add "$WORKTREE_PATH" "$BRANCH_NAME"
+    else
+      git worktree add "$WORKTREE_PATH" -b "$BRANCH_NAME" origin/dev
+    fi
   else
-    echo "  Creating branch: $BRANCH_NAME"
-    git -C "$PROJECT_DIR" checkout -b "$BRANCH_NAME"
+    echo "Reusing existing worktree at .worktrees/$WORKTREE_NAME"
   fi
-  echo ""
+
+  echo "Syncing Bart state into worktree..."
+  mkdir -p "$WORKTREE_PATH/outputs/bart/screenshots"
+  cp "$BRIEF_FILE" "$WORKTREE_PATH/outputs/bart/$(basename "$BRIEF_FILE")"
+  [ -f "$PROJECT_DIR/outputs/bart/progress.txt" ] && \
+    cp "$PROJECT_DIR/outputs/bart/progress.txt" "$WORKTREE_PATH/outputs/bart/progress.txt" || true
+
+  echo "Setting up worktree env (.env + node_modules)..."
+  (cd "$WORKTREE_PATH" && npm run worktree:setup)
+
+  echo "Re-executing Bart inside worktree..."
+  cd "$WORKTREE_PATH"
+  exec "$SCRIPT_DIR/bart.sh"
 fi
+
+# ---- We are inside a worktree ----
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+if [ "$CURRENT_BRANCH" != "$BRANCH_NAME" ]; then
+  echo ""
+  echo "Error: worktree on branch '$CURRENT_BRANCH' but design-brief.json expects '$BRANCH_NAME'."
+  echo "       Run from main repo to bootstrap a fresh worktree, or fix the branch manually."
+  echo ""
+  exit 1
+fi
+echo "Running Bart inside worktree: $GIT_TOPLEVEL"
+echo "Branch: $CURRENT_BRANCH"
 
 # ---- Set up ----
 mkdir -p "$PROJECT_DIR/outputs/bart/screenshots" "$HOME/.claude/agents/learnings"
@@ -164,6 +236,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     echo "  Bart completed all design tasks!"
     echo "  Completed at iteration $i of $MAX_ITERATIONS — $(date)"
     echo "  Screenshots: outputs/bart/screenshots/"
+    echo "  Worktree:    $GIT_TOPLEVEL"
     echo "================================================================"
 
     # ---- Post to Linear if issue ID is set ----
