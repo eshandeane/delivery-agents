@@ -1,6 +1,6 @@
 # Delivery Agents
 
-Autonomous AI agents for product and engineering teams. Each one runs via the Claude CLI and integrates with your connected MCPs (Circleback, Slack, Gmail, Jira, Linear, etc.).
+Autonomous AI agents for product and engineering teams. Each one runs via the Claude CLI and integrates with your connected MCPs (Circleback, Slack, Gmail, Jira, etc.).
 
 The pipeline runs: **Homer → Lisa → (you decide) → Marge → Bart → Prince**.
 
@@ -9,7 +9,7 @@ The pipeline runs: **Homer → Lisa → (you decide) → Marge → Bart → Prin
 | Agent | Role | How it's triggered | Loop? |
 |---|---|---|---|
 | **Homer** | Orchestrator — scans Jira Roadmap + Design tickets, judges readiness, triggers Lisa or Bart | `/homer` in Claude Code, or scheduled via launchd 3×/day (08:00, 12:00, 16:00) | Outer schedule loop + per-ticket eval loop |
-| **Lisa** | Discovery research — synthesizes the pain point from Circleback, Slack, and Gmail into a structured discovery brief | `/lisa` → `npm run lisa`, called by Homer, or polled from Linear every 30 min via launchd | One-shot per brief; polling loop optional |
+| **Lisa** | Discovery research — synthesizes the pain point from Circleback, Slack, and Gmail into a structured discovery brief | `/lisa` → `npm run lisa`, or called by Homer | One-shot per brief |
 | **Marge** | PRD writing — turns an approved discovery doc + your solution decision into a PRD | `/marge` → `npm run marge` | One-shot |
 | **Bart** | UI/UX prototyping — builds, reviews, and iterates on frontend components in a dedicated git worktree | `/bart` → `npm run bart`, or called by Homer with `--ticket FDE-XXX` | **Internal loop, up to 15 iterations** |
 | **Prince** | Acceptance testing — reads a PRD, drives the browser through every criterion, produces a pass/fail report | `/prince` → `npm run prince -- path/to/prd.md` | Auto-fix loop on failure |
@@ -68,9 +68,7 @@ npm run lisa   # run the research
 /lisa status   # see the last run's output
 ```
 
-**Two ways to invoke:**
-- **Manual** — write a brief via `/lisa`, then run `npm run lisa`.
-- **Auto-polled** — `poll-linear.sh` runs every 30 min via `com.cutanddry.lisa-poller.plist`. It looks for Linear tickets labeled `lisa-ready`, swaps the label to `lisa-researching`, writes the brief, runs Lisa, posts the discovery doc back as a Linear comment, then swaps the label to `lisa-complete`.
+Lisa is most often invoked by Homer after Homer judges that a Roadmap ticket has enough signal. You can also write a brief manually via `/lisa` and run `npm run lisa` directly.
 
 ---
 
@@ -178,7 +176,6 @@ Agents use whatever MCPs you have connected in Claude Code. The more you connect
 | Tool | Used by | What it provides |
 |---|---|---|
 | Jira (Atlassian) | Homer | Roadmap + Design ticket queue, comment audit trail |
-| Linear | Lisa (poller) | `lisa-ready` ticket queue |
 | Circleback | Homer, Lisa | Meeting transcripts — primary user voice |
 | Slack | Homer, Lisa, Prince | Team conversations, decisions, test notifications |
 | Gmail | Homer, Lisa | Email threads |
